@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FakeBodyscan</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    background: #03131a;
+    color: #7ff5e0;
+    font-family: "Microsoft JhengHei", "PingFang TC", sans-serif;
+    overflow: hidden;
+    cursor: default;
+  }
+  section {
+    display: none;
+    position: fixed;
+    inset: 0;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3vh;
+    text-align: center;
+  }
+  body[data-state="idle"] #standby,
+  body[data-state="scan"] #scan,
+  body[data-state="found"] #found,
+  body[data-state="clear"] #clear { display: flex; }
+
+  h1 { font-size: 6vh; letter-spacing: .3em; font-weight: 600; }
+  .sub { font-size: 3vh; opacity: .75; }
+  .brand { position: absolute; top: 3vh; right: 3vw; font-size: 2.2vh; opacity: .6; letter-spacing: .1em; }
+  .blink { animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: .2; } }
+
+  /* 待機 */
+  #wait { font-size: 3.5vh; }
+  #setup {
+    position: absolute; bottom: 3vh; left: 0; right: 0;
+    display: flex; flex-direction: column; align-items: center; gap: 1.2vh;
+    font-size: 2vh; line-height: 1.6;
+  }
+  #setup .row { display: flex; gap: 1.5vw; align-items: center; flex-wrap: wrap; justify-content: center; }
+  #setup button {
+    padding: .8vh 1.6vw; border-radius: 999px;
+    border: 1px solid currentColor; background: transparent; color: inherit;
+    font: inherit; cursor: pointer;
+  }
+  #setup button:hover { background: #7ff5e022; }
+  #setup .note { opacity: .55; }
+  :root:fullscreen #setup { display: none; }
+
+  /* 掃描中 */
+  .radar {
+    width: 50vh; height: 50vh; border-radius: 50%;
+    border: 2px solid #7ff5e0;
+    background:
+      radial-gradient(circle, transparent 0 32%, #7ff5e055 32% 32.6%, transparent 32.6% 65%, #7ff5e055 65% 65.6%, transparent 65.6%),
+      #06222b;
+    position: relative; overflow: hidden;
+  }
+  .radar::before {
+    content: ""; position: absolute; inset: 0;
+    background: conic-gradient(from 0deg, transparent 0 75%, #7ff5e0cc 100%);
+    animation: sweep 1.6s linear infinite;
+  }
+  @keyframes sweep { to { transform: rotate(360deg); } }
+  #readout { font: 2.6vh Consolas, monospace; opacity: .8; }
+
+  /* 發現蟲蟲 */
+  #found { background: #000; }
+  #bugs { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  #alert {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: 2vh; font-size: 5vh; font-weight: 700; letter-spacing: .2em;
+    color: #fff; background: #d6001c;
+    animation: blink .5s steps(2) infinite;
+  }
+  #fallback { display: none; font-size: 22vh; animation: wiggle .3s ease-in-out infinite alternate; }
+  @keyframes wiggle { from { transform: rotate(-8deg); } to { transform: rotate(8deg); } }
+  body.no-video #bugs { display: none; }
+  body.no-video #fallback { display: block; }
+
+  /* 清除完畢 */
+  #clear { background: #052b14; color: #6dff8a; }
+  #clear .ok { font-size: 26vh; line-height: 1; }
+</style>
+</head>
+<body data-state="idle" class="no-video">
+  <section id="standby">
+    <div class="brand">整人用FakeBodyscan</div>
+    <h1>人體蟲蟲掃描系統</h1>
+    <div id="wait" class="blink">請接上感應器…</div>
+    <div id="setup">
+      <div class="row">
+        <button id="pair">① 配對感應器(手機)</button>
+        <span id="pairStatus">尚未配對</span>
+      </div>
+      <div class="row">
+        <button id="pick">② 選擇影片</button>
+        <span id="videoStatus">尚未選擇</span>
+        <input id="file" type="file" accept="video/*" hidden>
+      </div>
+      <div class="row">
+        <button id="full">③ 全螢幕(這塊設定會隱藏)</button>
+      </div>
+      <div class="note">空白鍵 = 下一步 N = 沒有蟲蟲 R = 重來 F = 全螢幕</div>
+    </div>
+  </section>
+
+  <section id="scan">
+    <div class="radar"></div>
+    <h1 class="blink">掃描中…</h1>
+    <div class="sub">感應器已連線 ✓ 請將感應器貼在肚子上</div>
+    <div id="readout"></div>
+  </section>
+
+  <section id="found">
+    <video id="bugs" loop playsinline preload="auto"></video>
+    <div id="fallback">🐛🪱🐛</div>
+    <div id="alert">⚠ 警告:肚子裡發現蟲蟲!</div>
+  </section>
+
+  <section id="clear">
+    <div class="ok">✔</div>
+    <h1>蟲蟲已全部清除</h1>
+    <div class="sub">肚子恢復健康!</div>
+  </section>
+
+<script>
+  const VIDEO_FILE = 'video/1012.mov';  // 預設影片;用「選擇影片」挑的檔案會優先
+  const SCAN_SECONDS = 8;               // 接上感應器後,掃描幾秒才「發現蟲蟲」
+
+  const $ = id => document.getElementById(id);
+  const video = $('bugs');
+  const order = { idle: 'scan', scan: 'found', found: 'clear', clear: 'idle' };
+  let state = 'idle';
+  let ctx, beepTimer, foundTimer, unplugTimer;
+
+  // ---------- 聲音 ----------
+  function tone(freq, at, dur) {
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = freq;
+    gain.gain.value = 0.2;
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(ctx.currentTime + at);
+    osc.stop(ctx.currentTime + at + dur);
+  }
+
+  const loops = {
+    scan:  { every: 1000, play: () => tone(880, 0, .12) },
+    found: { every: 650,  play: () => [0, .15, .3].forEach(t => tone(1760, t, .09)) },
+  };
+
+  function sound() {
+    clearInterval(beepTimer);
+    if (!ctx) return;
+    if (state === 'clear') {
+      tone(660, 0, .15); tone(880, .18, .15); tone(1320, .36, .3);
+      return;
+    }
+    const loop = loops[state];
+    if (!loop) return;
+    loop.play();
+    beepTimer = setInterval(loop.play, loop.every);
+  }
+
+  // 瀏覽器要在使用者點擊或按鍵後才能發出聲音
+  function unlockAudio() {
+    if (!ctx) {
+      ctx = new AudioContext();
+      sound();
+    }
+    ctx.resume();
+  }
+  document.addEventListener('pointerdown', unlockAudio, true);
+  document.addEventListener('keydown', unlockAudio, true);
+
+  // ---------- 狀態 ----------
+  function setState(next) {
+    if (next === state) return;
+    state = next;
+    document.body.dataset.state = next;
+    clearTimeout(foundTimer);
+    sound();
+    if (next === 'scan') foundTimer = setTimeout(() => setState('found'), SCAN_SECONDS * 1000);
+    if (next === 'found' && !document.body.classList.contains('no-video')) {
+      video.currentTime = 0;
+      video.muted = false;
+      video.play().catch(() => {
+        video.muted = true;
+        video.play().catch(() => {});
+      });
+    } else {
+      video.pause();
+    }
+  }
+
+  function fullscreen() {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Space') { e.preventDefault(); setState(order[state]); }
+    else if (e.code === 'KeyN') setState('clear');
+    else if (e.code === 'KeyR') setState('idle');
+    else if (e.code === 'KeyF') fullscreen();
+  });
+  $('full').onclick = fullscreen;
+
+  setInterval(() => {
+    if (state !== 'scan') return;
+    const n = (lo, hi) => (lo + Math.random() * (hi - lo)).toFixed(1);
+    $('readout').textContent = `深度 ${n(2, 9)} cm   訊號 ${n(60, 99)} %   生物反應 ${n(0, 5)}`;
+  }, 200);
+
+  // ---------- 感應器(手機傳輸線) ----------
+  if (navigator.usb) {
+    navigator.usb.addEventListener('connect', () => {
+      clearTimeout(unplugTimer);
+      if (state === 'idle') setState('scan');
+    });
+    // 手機剛插上時常會斷一下再連回來,所以等一會兒才當作真的拔掉
+    navigator.usb.addEventListener('disconnect', () => {
+      clearTimeout(unplugTimer);
+      unplugTimer = setTimeout(() => setState('idle'), 1500);
+    });
+    navigator.usb.getDevices().then(devices => {
+      if (devices.length) $('pairStatus').textContent = '已配對 ✓ 表演時把手機插上就會開始';
+    });
+    $('pair').onclick = async () => {
+      try {
+        const device = await navigator.usb.requestDevice({ filters: [] });
+        $('pairStatus').textContent = `已配對 ${device.productName || '裝置'} ✓ 先拔掉,表演時再插上`;
+      } catch {
+        // 使用者按了取消
+      }
+    };
+  } else {
+    $('pair').disabled = true;
+    $('pairStatus').textContent = '此瀏覽器無法偵測傳輸線,請改用 Chrome 或 Edge(仍可用空白鍵操作)';
+  }
+
+  // ---------- 影片 ----------
+  function openStore(mode) {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('fakebodyscan', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('files');
+      req.onsuccess = () => resolve(req.result.transaction('files', mode).objectStore('files'));
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function request(req) {
+    return new Promise((resolve, reject) => {
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  video.addEventListener('loadedmetadata', () => {
+    document.body.classList.remove('no-video');
+    $('videoStatus').textContent = '影片已就緒 ✓';
+  });
+  video.addEventListener('error', () => {
+    document.body.classList.add('no-video');
+    $('videoStatus').textContent = '找不到影片,請選擇一個影片檔';
+  });
+
+  $('pick').onclick = () => $('file').click();
+  $('file').onchange = async () => {
+    const file = $('file').files[0];
+    if (!file) return;
+    video.src = URL.createObjectURL(file);
+    try {
+      await request((await openStore('readwrite')).put(file, 'video'));
+    } catch {
+      // 存不進瀏覽器也沒關係,這次照樣能播,只是下次要重選
+    }
+  };
+
+  // 先載入預設影片;瀏覽器裡若存有之前挑的檔案,再換成那一個
+  video.src = VIDEO_FILE;
+  (async () => {
+    try {
+      const saved = await request((await openStore('readonly')).get('video'));
+      if (saved) video.src = URL.createObjectURL(saved);
+    } catch {
+      // 讀不到就維持預設影片
+    }
+  })();
+</script>
+</body>
+</html>
